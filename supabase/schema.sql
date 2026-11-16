@@ -123,6 +123,11 @@ alter table public.count_lines enable row level security;
 
 revoke all on public.profiles, public.materials, public.scans, public.counts, public.count_lines from anon;
 revoke insert, update, delete on public.profiles, public.scans, public.counts, public.count_lines from authenticated;
+-- Explicit grants, so this works even when "Automatically expose new tables" is switched off.
+-- RLS policies below still decide which rows each signed-in person can see or change.
+grant usage on schema public to authenticated;
+grant select on public.profiles, public.materials, public.scans, public.counts, public.count_lines to authenticated;
+grant insert, update, delete on public.materials to authenticated;
 
 drop policy if exists profiles_read   on public.profiles;
 drop policy if exists materials_read  on public.materials;
