@@ -80,15 +80,16 @@
       <h3>Made a mistake?</h3>
       <p>You can undo your own scan for 15 minutes from the banner or from History. After that, ask an admin.</p>
       <h3>Code not found</h3>
-      <p>A short form appears so you can add the material on the spot, then carry on scanning.</p>
+      <p>The material isn't in the list yet. Managers can add it on the spot. Everyone else should ask a manager.</p>
       <h3>Cycle counts</h3>
-      <p>Counts tab: pick materials, count what's on the shelf (expected numbers stay hidden), send for approval. An admin approves differences.</p>
-      <h3>For admins</h3>
-      <p><b>Stock</b> tab: add, edit, correct counts, delete, export, or import a CSV. <b>Team</b> tab: add other admins.</p>
+      <p>Counts tab: open a count, enter what's on the shelf (expected numbers stay hidden), send for approval. A manager approves differences.</p>
+      <h3>Roles</h3>
+      <p><b>Warehouse</b>: scan in and out, see stock and history, count. <b>Manager</b>: also add and edit materials, correct counts, approve counts, import and export. <b>Admin</b>: also approves new people and sets roles on the <b>Team</b> tab.</p>
     </div>
   </section>
 </main>
 
+<div id="gate" hidden></div>
 <div id="toast" hidden></div>
 <dialog id="modal"></dialog>
 <datalist id="jobs"></datalist>
@@ -102,6 +103,8 @@
   <button data-act="tab" data-t="help"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.7.4-1 1-1 1.7M12 17h.01"/></svg>Help</button>
 </nav>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="config.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
