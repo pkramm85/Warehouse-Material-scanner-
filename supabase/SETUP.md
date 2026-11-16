@@ -24,6 +24,9 @@ Only `@carrduff.com` emails can sign up. `pkramm@carrduff.com` becomes the first
 5. Give those two values to Claude. The anon key is designed to be public, since the database rules protect the data. Never share the **service_role** key with anyone.
 
 ## Adding people
+Easiest: on the **Team** tab press **+ Add person**, enter their work email, role and locations. When they sign up with that email they are approved immediately. (`supabase/004_people.sql` adds this; it is already in `schema.sql`.)
+
+Other ways:
 - They open the app and sign up with their work email, then confirm the email.
 - You approve them under **Team**, pick their role, and tap their locations line to choose where they can work.
 - Supabase's built-in email is limited to a few messages per hour. For a big rollout, create users under **Authentication > Users > Add user** with "Auto confirm" ticked, or set up a custom email sender later.
