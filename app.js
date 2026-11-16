@@ -388,10 +388,15 @@ function importFlow(file) {
 
 // ---------- LABELS (barcode generator) ----------
 const parseCodes = txt => [...new Set(txt.split(/[\n,;]+/).map(s => s.trim()).filter(Boolean))].slice(0, 200);
+// A scanner needs bars of at least ~0.33 mm. A half-width label is ~87 mm wide, a full-width one ~188 mm.
+// So codes needing more than 260 modules go full width, and more than 560 modules can't be made reliable.
 function labelHTML(code) {
   const m = S.materials[norm(code)] || S.materials[code];
-  try { return `<div class="lbl"><div class="ln">${esc(m ? m.name : "")}</div>${Code128.svg(code, { module: 2, height: 60 })}<div class="lc">${esc(code)}</div></div>`; }
-  catch (e) { return `<div class="lbl bad">${esc(code)}<br>${esc(e.message)}</div>`; }
+  try {
+    const w = Code128.width(code);
+    if (w > 560) throw new Error("Too long to print as a reliable barcode (about 50 characters max).");
+    return `<div class="lbl${w > 260 ? " wide" : ""}"><div class="ln">${esc(m ? m.name : "")}</div>${Code128.svg(code, { module: 2, height: 60 })}<div class="lc">${esc(code)}</div></div>`;
+  } catch (e) { return `<div class="lbl bad">${esc(code)}<br>${esc(e.message)}</div>`; }
 }
 function labelsModal(prefill) {
   const f = modal(`<h3>Barcode labels</h3><p class="meta">Type or paste SKUs, one per line. Each becomes a Code 128 barcode that the camera and Bluetooth scanners can read. Names appear when the SKU is in Stock.</p>

@@ -44,5 +44,9 @@ window.Code128 = (function () {
     const W = x + quiet;
     return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${height}" preserveAspectRatio="none" role="img" aria-label="Barcode ${String(text).replace(/[<>&"]/g, "")}"><rect width="${W}" height="${height}" fill="#fff"/><g fill="#000">${bars}</g></svg>`;
   }
-  return { svg, symbols, patterns: P };
+  // Total width in modules (thin-bar widths), including quiet zones. Used to size labels.
+  function width(text) {
+    return symbols(text).reduce((n, s) => n + [...P[s]].reduce((a, w) => a + +w, 0), 20);
+  }
+  return { svg, symbols, width, patterns: P };
 })();

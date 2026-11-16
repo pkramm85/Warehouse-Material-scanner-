@@ -174,6 +174,7 @@ textarea:focus { outline:2px solid var(--brand); outline-offset:-1px; }
 .lbl svg { width:100%; height:44px; display:block; margin:4px 0 2px; stroke:none; stroke-width:0; }
 .lbl svg * { stroke:none; stroke-width:0; }
 .lbl .lc { font:600 13px ui-monospace, Menlo, monospace; letter-spacing:.04em; }
+.lbl.wide { grid-column:1 / -1; }
 .lbl.bad { border-color:var(--outink); color:var(--outink); font-size:12px; }
 #printArea { display:none; }
 @media print {
