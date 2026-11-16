@@ -2,62 +2,104 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Warehouse Material Scanner</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#ffffff">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Material Scanner">
+<title>Material Scanner | Carr &amp; Duff</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@500;600;700&family=Inter:wght@400;500;600&display=swap">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<header><h1>Material Scanner</h1></header>
+
+<header class="top">
+  <img class="logo" src="assets/carr-duff-logo.png" alt="Carr &amp; Duff">
+  <button class="me" data-act="editMe" aria-label="Your profile"><span class="av" id="av">?</span><span id="meName"></span></button>
+</header>
 
 <main>
+  <h1 class="app">Material Scanner</h1>
+
   <!-- SCAN -->
-  <section id="tab-scan" class="tab active">
-    <video id="video" playsinline muted hidden></video>
-    <div class="row">
-      <button id="camBtn">Start camera</button>
-      <button id="camStop" class="ghost" hidden>Stop</button>
+  <section id="v-scan" class="view active">
+    <div class="seg" id="mode">
+      <button data-act="mode" data-m="in">
+        <svg viewBox="0 0 24 24"><path d="M12 4v12M7 11l5 5 5-5M5 20h14"/></svg>Check in</button>
+      <button data-act="mode" data-m="out" class="on">
+        <svg viewBox="0 0 24 24"><path d="M12 16V4M7 9l5-5 5 5M5 20h14"/></svg>Check out</button>
     </div>
-    <p id="camMsg" class="hint"></p>
-    <label>Code (type, or use a Bluetooth/USB scanner)
-      <input id="codeInput" autocomplete="off" autocapitalize="characters" placeholder="Scan or type a code, press Enter">
-    </label>
-    <div id="result"></div>
-  </section>
 
-  <!-- INVENTORY -->
-  <section id="tab-inventory" class="tab">
-    <input id="search" placeholder="Search code, name or location">
-    <div class="row">
-      <button id="exportBtn" class="ghost">Export CSV</button>
-      <button id="logBtn" class="ghost">Export history</button>
+    <div class="cam" id="cam">
+      <video id="video" playsinline muted></video>
+      <div class="frame"><i></i><i></i><i></i><i></i></div>
+      <div class="camInner">
+        <svg viewBox="0 0 24 24" class="big"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M7 12h10"/></svg>
+        <p id="camMsg">Point the camera at a barcode or QR code</p>
+        <button class="btn dark" data-act="startCam">Start camera</button>
+      </div>
+      <button class="stop" data-act="stopCam">Stop</button>
     </div>
-    <div id="invList"></div>
+
+    <form id="codeForm" class="find">
+      <input id="code" placeholder="Or type the code" autocomplete="off" autocapitalize="characters" enterkeyhint="search">
+      <button class="btn light">Find</button>
+    </form>
+
+    <div id="scanPanel"></div>
+
+    <h2>Low stock</h2>
+    <p class="sub">Materials at or below their minimum.</p>
+    <div id="lowList" class="list"></div>
+
+    <h2>Recent scans</h2>
+    <div id="recent" class="list"></div>
   </section>
 
-  <!-- RECEIVE -->
-  <section id="tab-receive" class="tab">
-    <label>PO number <input id="poInput" placeholder="e.g. PO-10442"></label>
-    <label>Code <input id="rcCode" autocomplete="off" autocapitalize="characters"></label>
-    <label>Item name (new items only) <input id="rcName"></label>
-    <label>Quantity <input id="rcQty" type="number" min="1" value="1" inputmode="numeric"></label>
-    <label>Location <input id="rcLoc" list="locList" autocapitalize="characters" placeholder="e.g. A-03-2"></label>
-    <button id="rcBtn">Receive</button>
-    <p id="rcMsg" class="hint"></p>
-  </section>
+  <!-- STOCK -->
+  <section id="v-stock" class="view"></section>
+  <!-- HISTORY -->
+  <section id="v-history" class="view"></section>
+  <!-- COUNTS -->
+  <section id="v-counts" class="view"></section>
+  <!-- TEAM -->
+  <section id="v-team" class="view"></section>
 
-  <!-- LOCATIONS -->
-  <section id="tab-locations" class="tab">
-    <div id="locView"></div>
+  <!-- HELP -->
+  <section id="v-help" class="view">
+    <h2 class="first">Help</h2>
+    <p class="sub">How to use Material Scanner.</p>
+    <div class="card help">
+      <h3>Scan material in or out</h3>
+      <ol>
+        <li>On <b>Scan</b>, pick <b>Check in</b> (arriving) or <b>Check out</b> (leaving).</li>
+        <li>Press <b>Start camera</b> and point it at the barcode. If it won't read, type the code and press <b>Find</b>.</li>
+        <li>Set the quantity, add the job or reason, then press the big button.</li>
+        <li>A banner shows the new stock level. Press <b>Undo</b> if you slipped.</li>
+      </ol>
+      <h3>Made a mistake?</h3>
+      <p>You can undo your own scan for 15 minutes from the banner or from History. After that, ask an admin.</p>
+      <h3>Code not found</h3>
+      <p>A short form appears so you can add the material on the spot, then carry on scanning.</p>
+      <h3>Cycle counts</h3>
+      <p>Counts tab: pick materials, count what's on the shelf (expected numbers stay hidden), send for approval. An admin approves differences.</p>
+      <h3>For admins</h3>
+      <p><b>Stock</b> tab: add, edit, correct counts, delete, export, or import a CSV. <b>Team</b> tab: add other admins.</p>
+    </div>
   </section>
 </main>
 
-<datalist id="locList"></datalist>
+<div id="toast" hidden></div>
+<dialog id="modal"></dialog>
+<datalist id="jobs"></datalist>
 
-<nav>
-  <button data-tab="scan" class="on">Scan</button>
-  <button data-tab="inventory">Inventory</button>
-  <button data-tab="receive">Receive</button>
-  <button data-tab="locations">Locations</button>
+<nav class="tabs">
+  <button data-act="tab" data-t="scan" class="on"><svg viewBox="0 0 24 24"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M7 12h10"/></svg>Scan</button>
+  <button data-act="tab" data-t="stock"><svg viewBox="0 0 24 24"><path d="M21 8l-9-5-9 5v8l9 5 9-5zM3 8l9 5 9-5M12 13v8"/></svg>Stock</button>
+  <button data-act="tab" data-t="history"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>History</button>
+  <button data-act="tab" data-t="counts"><svg viewBox="0 0 24 24"><rect x="6" y="4" width="12" height="17" rx="2"/><path d="M9 4h6v3H9zM9 12h6M9 16h6"/></svg>Counts</button>
+  <button data-act="tab" data-t="team"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><circle cx="17" cy="9" r="2.5"/><path d="M17 14c2.5 0 4 2 4 4"/></svg>Team</button>
+  <button data-act="tab" data-t="help"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.7.4-1 1-1 1.7M12 17h.01"/></svg>Help</button>
 </nav>
 
 <script src="app.js"></script>

@@ -1,16 +1,20 @@
-# Warehouse Material Scanner
+# Material Scanner (Carr & Duff)
 
-A phone-friendly web app for scanning materials and tracking warehouse stock. No build step and no dependencies: plain HTML, CSS and JavaScript.
+A phone-friendly web app for checking material in and out, tracking stock, and running cycle counts. Plain HTML, CSS and JavaScript: no build step, no installs.
 
-## Features
-- **Scan**: camera barcode/QR reading, or type/Bluetooth/USB scanner input. Look up an item, adjust quantity, move location, set a minimum-stock alert.
-- **Inventory**: searchable list, CSV export of stock and of the full change history.
-- **Receive**: log incoming material against a PO number.
-- **Locations**: stock grouped by bin/shelf.
+## Tabs
+- **Scan**: Check in / Check out, camera or typed code, quantity, job, note. Undo for 15 minutes. Low-stock list and recent scans.
+- **Stock**: on-hand list, low/out tiles, search. Admins can add, edit, correct counts, delete, export and import a CSV.
+- **History**: every scan, searchable and filterable, with CSV export.
+- **Counts**: blind cycle counts with admin approval of differences.
+- **Team**: admins. The first person to set up the app is an admin.
+- **Help**: in-app instructions.
 
-## Run it
-From this folder: `python3 -m http.server 8000`, then open `http://localhost:8000`.
-The camera needs `localhost` or `https`. To use it on a phone, host the folder on GitHub Pages (Settings > Pages).
+## Run locally
+`python3 -m http.server 8000`, then open `http://localhost:8000`. The camera needs https or localhost (GitHub Pages is https).
+
+## Camera
+Uses the browser's built-in BarcodeDetector where available (Chrome on Android). Everywhere else, including iPhone, it loads the ZXing library on demand.
 
 ## Data
-Stored in the browser's localStorage, so each device has its own copy. Use the CSV exports for backup. A shared database is the planned next step.
+Saved in each browser's localStorage, so every phone has its own copy and roles are not enforced across devices. Use Export for backups. A shared database with sign-in is the planned next step.
