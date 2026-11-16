@@ -19,7 +19,7 @@ const ICON = {
 };
 
 // ---------- state + backend ----------
-const S = { me: null, locs: [], allLocs: [], dest: [], cur: null, materials: {}, scans: [], counts: [], team: [], uloc: {}, detail: null };
+const S = { me: null, locs: [], allLocs: [], dest: [], cur: null, materials: {}, scans: [], counts: [], team: [], invites: [], uloc: {}, detail: null };
 let sb = null;
 const role = () => S.me?.role;
 const isManager = () => role() === "manager" || role() === "admin";
@@ -58,6 +58,7 @@ async function loadAll() {
   }
   if (isAdmin()) {
     S.team = await ok(sb.from("profiles").select("*").order("created_at"));
+    S.invites = await ok(sb.from("invites").select("*").order("created_at"));
     S.uloc = {}; (await ok(sb.from("user_locations").select("*"))).forEach(r => (S.uloc[r.user_id] ||= []).push(r.location_id));
   }
 }
@@ -68,7 +69,7 @@ function liveReload() {
 }
 function subscribe() {
   const ch = sb.channel("live");
-  ["materials", "stock", "scans", "counts", "locations", "user_locations"].forEach(t => ch.on("postgres_changes", { event: "*", schema: "public", table: t }, liveReload));
+  ["materials", "stock", "scans", "counts", "locations", "user_locations", "profiles", "invites"].forEach(t => ch.on("postgres_changes", { event: "*", schema: "public", table: t }, liveReload));
   ch.subscribe();
 }
 const curName = () => S.locs.find(l => l.id === S.cur)?.name || "";
@@ -127,6 +128,7 @@ function modal(html, onSubmit) {
   return f;
 }
 const closeModal = () => $("#modal").close();
+$("#modal").addEventListener("close", () => { stopCam(); if (draft) draft.cam = false; });
 const mErr = (f, msg) => { const e = $(".err", f); if (e) e.textContent = msg; };
 
 // ---------- sign-in gate ----------
@@ -287,8 +289,9 @@ const loadZX = () => new Promise((res, rej) => {
   s.src = "https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js";
   s.onload = res; s.onerror = rej; document.head.appendChild(s);
 });
-async function startCam() {
-  const cam = $("#cam"), v = $("#video");
+let camEl = null;
+async function camStart(cam, v, msgEl, handler) {
+  camEl = cam;
   cam.classList.add("live");
   try {
     if ("BarcodeDetector" in window) {
@@ -297,27 +300,28 @@ async function startCam() {
       const det = new BarcodeDetector(); scanning = true;
       (async function loop() {
         while (scanning) {
-          try { const r = await det.detect(v); if (r.length) return onRead(r[0].rawValue); } catch { /* frame not ready */ }
+          try { const r = await det.detect(v); if (r.length) return handler(r[0].rawValue); } catch { /* frame not ready */ }
           await new Promise(r => setTimeout(r, 200));
         }
       })();
     } else {
       await loadZX();
       reader = new ZXing.BrowserMultiFormatReader();
-      await reader.decodeFromConstraints({ video: { facingMode: "environment" } }, "video", r => { if (r) onRead(r.getText()); });
+      await reader.decodeFromConstraints({ video: { facingMode: "environment" } }, v, r => { if (r) handler(r.getText()); });
     }
   } catch {
     stopCam();
-    $("#camMsg").textContent = "Couldn't open the camera. Allow camera access, or type the code below.";
+    msgEl.textContent = "Couldn't open the camera. Allow camera access, or type the code.";
   }
 }
+const startCam = () => camStart($("#cam"), $("#video"), $("#camMsg"), onRead);
 function stopCam() {
   scanning = false;
   try { reader && reader.reset(); } catch { /* already stopped */ }
   reader = null;
   if (stream) stream.getTracks().forEach(t => t.stop());
   stream = null;
-  $("#cam").classList.remove("live");
+  if (camEl) camEl.classList.remove("live");
 }
 function onRead(text) {
   navigator.vibrate && navigator.vibrate(80);
@@ -483,7 +487,9 @@ function reqModal() {
     <p class="meta">${esc(curName())} &middot; ${issue ? "Everything below comes out of stock in one step." : "Everything below goes back into stock."}</p>
     <label>Job number<input name="job" id="rqJob" list="jobs" value="${esc(d.job)}" placeholder="e.g. C-230545" autocapitalize="characters" autocomplete="off" required></label>
     ${issue ? "" : `<button type="button" class="btn light sm" style="margin-top:8px" data-act="rqLoad">Load what's out on this job</button>`}
-    <label>Add material (scan or type a code or name)<input id="rqCode" list="matlist" autocomplete="off"></label>
+    <label>Add material (scan or type a code or name)</label>
+    <div class="row" style="margin-top:6px"><input id="rqCode" class="grow" list="matlist" autocomplete="off" placeholder="Type a code or name"><button type="button" class="btn light" data-act="rqCam">${d.cam ? "Stop camera" : "Scan"}</button></div>
+    ${d.cam ? `<div class="cam live" id="rqCamBox" style="margin-top:10px;aspect-ratio:4/3"><video id="rqVideo" playsinline muted></video><div class="frame"><i></i><i></i><i></i><i></i></div></div><p class="meta" id="rqCamMsg" style="margin-top:6px">${esc(d.camMsg || "Point at a barcode. Each scan adds 1. Change Qty first to add more.")}</p>` : ""}
     <div class="row" style="align-items:flex-end"><label class="grow">Qty<input id="rqQty" type="number" inputmode="numeric" min="1" value="1"></label><button type="button" class="btn dark" data-act="rqAdd" style="min-width:110px">Add</button></div>
     <datalist id="matlist">${Object.values(S.materials).map(m => `<option value="${esc(m.code)}">${esc(m.name)}</option>`).join("")}</datalist>
     <div class="pick" style="max-height:260px">${d.lines.length ? d.lines.map(l => { const m = S.materials[l.code]; return `<label style="justify-content:space-between"><span>${esc(m?.name || l.code)}<div class="meta">${esc(l.code)}${issue && m ? " &middot; " + m.qty + " here" : ""}</div></span><span style="display:flex;gap:8px;align-items:center"><input data-rq="${esc(l.code)}" type="number" inputmode="numeric" min="0" value="${l.qty}" style="width:76px;min-height:40px;height:40px"><button type="button" class="x" data-act="rqDel" data-code="${esc(l.code)}">&#10005;</button></span></label>`; }).join("") : '<div class="empty" style="margin:0">No materials added yet.</div>'}</div>
@@ -503,6 +509,17 @@ function reqModal() {
   const add = () => { rqSync(); const m = rqFind($("#rqCode").value), q = parseInt($("#rqQty").value, 10) || 0; if (!m) return mErr(f, "Pick a material from the list."); if (q < 1) return mErr(f, "Enter a quantity above 0."); const ex = draft.lines.find(l => l.code === m.code); if (ex) ex.qty += q; else draft.lines.push({ code: m.code, qty: q }); reqModal(); $("#rqCode").focus(); };
   f.addEventListener("keydown", e => { if (e.key === "Enter" && e.target.id === "rqCode") { e.preventDefault(); add(); } });
   f._add = add;
+  if (d.cam) {
+    const msg = $("#rqCamMsg");
+    camStart($("#rqCamBox"), $("#rqVideo"), msg, text => {
+      stopCam(); navigator.vibrate && navigator.vibrate(80);
+      rqSync();
+      const m = rqFind(text), q = parseInt($("#rqQty").value, 10) || 1;
+      if (!m) { draft.camMsg = `${text} isn't in the material list.`; }
+      else { const ex = draft.lines.find(l => l.code === m.code); if (ex) ex.qty += q; else draft.lines.push({ code: m.code, qty: q }); draft.camMsg = `Added ${m.name}. Scan the next one.`; }
+      setTimeout(() => { if (draft && draft.cam && $("#modal").open) reqModal(); }, 900);
+    });
+  }
 }
 
 // ---------- HISTORY ----------
@@ -581,13 +598,15 @@ function renderTeam() {
   if (!isAdmin()) { $("#v-team").innerHTML = `<h2 class="first">Team</h2><p class="sub">Your access.</p>${me}<p class="meta" style="margin-top:12px">Locations: ${S.locs.map(l => esc(l.name)).join(", ") || "none yet"}</p>`; return; }
   const sorted = [...S.team].sort((a, b) => (a.role === "pending" ? -1 : 0) - (b.role === "pending" ? -1 : 0) || a.name.localeCompare(b.name));
   const lname = id => S.allLocs.find(l => l.id === id)?.name;
-  $("#v-team").innerHTML = `<h2 class="first">Team</h2><p class="sub">New sign-ups wait here until you give them a role and a location. Warehouse scans and counts. Manager also edits stock and approves counts. Admin also manages people and locations.</p>${me}
+  const locLine = ids => (ids || []).map(lname).filter(Boolean).map(esc).join(", ") || "No locations yet";
+  $("#v-team").innerHTML = `<h2 class="first">Team</h2><p class="sub">Add people ahead of time, set their role and locations, or remove them. Warehouse scans and counts. Manager also edits stock and approves counts. Admin also manages people and locations.</p>${me}
     <div class="top2 ctr"><h2 style="margin-bottom:0">Locations</h2><button class="btn dark sm" data-act="locForm">+ Add location</button></div>
     ${S.allLocs.map(l => `<div class="item"><div><div class="nm">${esc(l.name)} ${l.active ? "" : '<span class="role pending">Off</span>'}</div></div><button class="btn light sm" data-act="locForm" data-id="${l.id}">Edit</button></div>`).join("")}
-    <h2>People</h2>
+    <div class="top2 ctr"><h2 style="margin-bottom:0">People</h2><button class="btn dark sm" data-act="personForm">+ Add person</button></div>
+    ${S.invites.length ? `<p class="sub" style="margin-top:12px">Approved, waiting for them to sign up</p>${S.invites.map(v => `<div class="item"><div><div class="nm">${esc(v.name)} <span class="role">${esc(v.role)}</span></div><div class="meta">${esc(v.email)}</div><div class="meta">${locLine(v.location_ids)}</div></div><button class="btn light sm" data-act="cancelInvite" data-email="${esc(v.email)}">Cancel</button></div>`).join("")}<p class="sub" style="margin-top:12px">People with accounts</p>` : ""}
     ${sorted.map(p => `<div class="item"><div><div class="nm">${esc(p.name)} ${p.role === "pending" ? '<span class="role pending">Needs approval</span>' : ""}${p.active ? "" : ' <span class="role pending">Off</span>'}</div><div class="meta">${esc(p.email)}</div>
-      ${p.role === "admin" ? '<div class="meta">All locations</div>' : p.role === "pending" ? "" : `<button class="link" data-act="userLocs" data-id="${p.id}">${(S.uloc[p.id] || []).map(lname).filter(Boolean).map(esc).join(", ") || "No locations. Tap to assign"}</button>`}</div>
-      ${p.id === S.me.id ? '<span class="role">You</span>' : `<select class="rsel" data-act="setRole" data-id="${p.id}">${["pending", "warehouse", "manager", "admin"].map(r => `<option value="${r}" ${p.role === r ? "selected" : ""}>${r === "pending" ? "No access" : r[0].toUpperCase() + r.slice(1)}</option>`).join("")}<option value="off" ${!p.active ? "selected" : ""}>Switch off</option></select>`}</div>`).join("")}`;
+      <div class="meta">${p.role === "admin" ? "All locations" : p.role === "pending" ? "No access yet" : locLine(S.uloc[p.id])}</div></div>
+      ${p.id === S.me.id ? '<span class="role">You</span>' : `<div style="text-align:right"><span class="role${p.role === "pending" ? " pending" : ""}">${p.role === "pending" ? "No access" : esc(p.role)}</span><div style="margin-top:8px"><button class="btn light sm" data-act="personForm" data-id="${p.id}">Manage</button></div></div>`}</div>`).join("")}`;
 }
 
 // ---------- profile ----------
@@ -701,6 +720,7 @@ const A = {
     });
   },
   rqNew: d => { draft = { kind: d.k, job: "", note: "", lines: [] }; reqModal(); },
+  rqCam: () => { rqSync(); draft.cam = !draft.cam; draft.camMsg = ""; if (!draft.cam) stopCam(); reqModal(); },
   rqAdd: () => $("#modal form")._add(),
   rqDel: d => { rqSync(); draft.lines = draft.lines.filter(l => l.code !== d.code); reqModal(); },
   rqLoad: async () => {
@@ -715,6 +735,39 @@ const A = {
       ${rows.length ? rows.map(r => `<div class="item"><div class="nm">${esc(r.name)}</div><b>${r.net} ${esc(r.unit)}</b></div>`).join("") : '<div class="empty">Nothing is currently out on this job here.</div>'}
       <div class="row"><button type="button" class="btn dark" data-act="mclose">Close</button></div>`);
   },
+  personForm: d => {
+    const p = d.id ? S.team.find(x => x.id === d.id) : null, have = p ? S.uloc[p.id] || [] : [];
+    const roleOpts = r => (p ? ["pending", "warehouse", "manager", "admin"] : ["warehouse", "manager", "admin"]).map(x => `<option value="${x}" ${r === x ? "selected" : ""}>${x === "pending" ? "No access" : x[0].toUpperCase() + x.slice(1)}</option>`).join("");
+    const f = modal(`<h3>${p ? "Manage " + esc(p.name) : "Add a person"}</h3>
+      <p class="meta">${p ? esc(p.email) : "Enter their work email. When they sign up with it, they get this role and these locations right away."}</p>
+      <label>Name<input name="name" value="${esc(p?.name || "")}" required></label>
+      ${p ? "" : '<label>Work email<input name="email" type="email" inputmode="email" autocapitalize="none" placeholder="name@carrduff.com" required></label>'}
+      <label>Role<select name="role">${roleOpts(p ? (p.active ? p.role : "pending") : "warehouse")}</select></label>
+      <label>Locations they can work in (admins always see all)</label>
+      <div class="pick" style="max-height:none">${S.allLocs.filter(l => l.active).map(l => `<label><input type="checkbox" name="l" value="${l.id}" ${have.includes(l.id) ? "checked" : ""}>${esc(l.name)}</label>`).join("")}</div>
+      ${p ? `<label style="display:flex;gap:10px;align-items:center;margin-top:14px"><input type="checkbox" name="on" style="width:auto;min-height:0" ${p.active ? "checked" : ""}> Account is on (uncheck to switch off without deleting)</label>` : ""}
+      <div class="err"></div>
+      <div class="row"><button type="button" class="btn light" data-act="mclose">Cancel</button><button class="btn dark">Save</button></div>
+      ${p ? `<button type="button" class="btn danger block" style="margin-top:12px" data-act="removePerson" data-id="${p.id}">Remove this person</button>` : ""}`, async fd => {
+      const name = (fd.get("name") || "").trim(), r = fd.get("role"), locs = fd.getAll("l");
+      if (!name) return mErr(f, "Enter a name.");
+      if (!p) { await rpc("invite_person", { p_email: (fd.get("email") || "").trim(), p_name: name, p_role: r, p_locations: locs }); toast("Approved. Ask them to sign up with that email."); }
+      else {
+        if (name !== p.name) await rpc("rename_person", { p_user: p.id, p_name: name });
+        await rpc("set_role", { p_user: p.id, p_role: r, p_active: !!fd.get("on") });
+        await rpc("set_user_locations", { p_user: p.id, p_locations: locs }); toast("Saved.");
+      }
+      await loadAll(); closeModal(); renderTeam();
+    });
+  },
+  removePerson: d => {
+    const p = S.team.find(x => x.id === d.id);
+    modal(`<h3>Remove ${esc(p.name)}?</h3><p class="meta">Their account is deleted and they can no longer sign in. Their past scans stay in History under their name. They can sign up again later if needed. To keep the account but block access, use Manage and switch it off instead.</p><div class="err"></div>
+      <div class="row"><button type="button" class="btn light" data-act="mclose">Cancel</button><button class="btn danger">Remove</button></div>`, async () => {
+      await rpc("remove_person", { p_user: d.id }); await loadAll(); closeModal(); renderTeam(); toast("Removed.");
+    });
+  },
+  cancelInvite: async d => { await rpc("cancel_invite", { p_email: d.email }); await loadAll(); renderTeam(); toast("Cancelled."); },
   editMe: profile,
   signOut,
   mclose: closeModal,
