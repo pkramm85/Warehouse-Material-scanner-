@@ -26,7 +26,7 @@ const isManager = () => role() === "manager" || role() === "admin";
 const isAdmin = () => role() === "admin";
 const unit = m => m.unit || "pcs";
 const state = m => (m.qty <= 0 ? "out" : m.min > 0 && m.qty <= m.min ? "low" : "ok");
-const mapScan = r => ({ other: r.other_location, loc: r.location_name, id: r.id, ts: Date.parse(r.ts), user: r.user_name, userId: r.user_id, code: r.code, name: r.name, unit: r.unit, type: r.type, delta: r.delta, after: r.after_qty, job: r.job, note: r.note });
+const mapScan = r => ({ reqId: r.req_id, other: r.other_location, loc: r.location_name, id: r.id, ts: Date.parse(r.ts), user: r.user_name, userId: r.user_id, code: r.code, name: r.name, unit: r.unit, type: r.type, delta: r.delta, after: r.after_qty, job: r.job, note: r.note });
 const fail = e => toast(friendly(e), true);
 const friendly = e => {
   const m = (e && e.message) || String(e);
@@ -219,8 +219,8 @@ function refresh(opts = {}) {
   $("#meName").textContent = S.me.name;
   $("#jobs").innerHTML = [...new Set(S.scans.map(s => s.job).filter(Boolean))].slice(0, 30).map(j => `<option value="${esc(j)}">`).join("");
   if (opts.quiet && tab === "counts" && openCount && S.detail?.status === "open") return; // don't wipe numbers being typed
-  if (opts.quiet && document.activeElement && /INPUT|SELECT/.test(document.activeElement.tagName) && ["stock", "history", "team"].includes(tab)) return;
-  ({ scan: renderScan, stock: renderStock, history: renderHistory, counts: renderCounts, team: renderTeam, help() {} })[tab]();
+  if (opts.quiet && document.activeElement && /INPUT|SELECT/.test(document.activeElement.tagName) && ["stock", "history", "team", "jobs"].includes(tab)) return;
+  ({ scan: renderScan, jobs: renderJobs, stock: renderStock, history: renderHistory, counts: renderCounts, team: renderTeam, help() {} })[tab]();
 }
 
 // ---------- SCAN ----------
@@ -236,7 +236,7 @@ function renderScan() {
     ? rec.map(s => `<div class="item"><div><div class="nm">${esc(s.name)}</div><div class="meta">${label(s)} &middot; ${when(s.ts)}${s.job ? " &middot; " + esc(s.job) : ""}</div></div></div>`).join("")
     : '<div class="empty">No scans yet.</div>';
 }
-const label = s => s.type === "transfer" ? (s.delta < 0 ? `Sent ${Math.abs(s.delta)} ${esc(s.unit)} to ${esc(s.other)}` : `Received ${s.delta} ${esc(s.unit)} from ${esc(s.other)}`) : s.type === "fix" ? `Count fix ${s.delta >= 0 ? "+" : ""}${s.delta}` : `${s.type === "in" ? "Checked in" : "Checked out"} ${Math.abs(s.delta)} ${esc(s.unit)}`;
+const label = s => s.reqId ? (s.delta < 0 ? `Issued ${Math.abs(s.delta)} ${esc(s.unit)} to job` : `Returned ${s.delta} ${esc(s.unit)} from job`) : s.type === "transfer" ? (s.delta < 0 ? `Sent ${Math.abs(s.delta)} ${esc(s.unit)} to ${esc(s.other)}` : `Received ${s.delta} ${esc(s.unit)} from ${esc(s.other)}`) : s.type === "fix" ? `Count fix ${s.delta >= 0 ? "+" : ""}${s.delta}` : `${s.type === "in" ? "Checked in" : "Checked out"} ${Math.abs(s.delta)} ${esc(s.unit)}`;
 
 function find(raw) {
   const code = norm(raw);
@@ -450,6 +450,61 @@ function labelsModal(prefill) {
   $("#lblCodes").oninput = upd; upd();
 }
 
+// ---------- JOBS (requisitions) ----------
+let jobQ = "", draft = null;
+function renderJobs() {
+  const q = jobQ.toLowerCase(), by = {};
+  S.scans.filter(s => s.reqId).forEach(s => { (by[s.reqId] ||= { id: s.reqId, ts: s.ts, user: s.user, job: s.job, kind: s.delta < 0 ? "issue" : "return", note: s.note, lines: [] }).lines.push(s); });
+  const reqs = Object.values(by).filter(r => !q || (r.job || "").toLowerCase().includes(q)).sort((a, b) => b.ts - a.ts).slice(0, 40);
+  $("#v-jobs").innerHTML = `<h2 class="first">Jobs</h2><p class="sub">Take several materials out to a job in one request, or roll them back into stock.</p>
+    <div class="row"><button class="btn dark grow" data-act="rqNew" data-k="issue">Issue to job</button><button class="btn light grow" data-act="rqNew" data-k="return">Return from job</button></div>
+    <input id="jobQ" style="margin-top:12px" placeholder="Search job number" value="${esc(jobQ)}">
+    ${reqs.length ? reqs.map(r => `<div class="card"><div class="top2"><div><h3>${esc(r.job)}</h3><div class="meta">${esc(r.user)} &middot; ${when(r.ts)}</div></div><span class="badge ${r.kind === "issue" ? "wait" : ""}">${r.kind === "issue" ? "Issued" : "Returned"}</span></div>
+      <div style="margin-top:8px">${r.lines.map(l => `<div class="meta" style="color:var(--ink)">${esc(l.name)} <b>${Math.abs(l.delta)} ${esc(l.unit)}</b></div>`).join("")}</div>
+      ${r.note ? `<div class="meta" style="margin-top:6px">${esc(r.note)}</div>` : ""}
+      <button class="link" data-act="jobNet" data-job="${esc(r.job)}">What's out on this job</button></div>`).join("")
+      : `<div class="empty"><b>No job requests yet</b>Use Issue to job to take material out against a job number like C-230545.</div>`}`;
+  $("#jobQ").oninput = e => { jobQ = e.target.value; const p = e.target.selectionStart; renderJobs(); const i = $("#jobQ"); i.focus(); i.setSelectionRange(p, p); };
+}
+function rqSync() {
+  if (!draft) return;
+  draft.job = $("#rqJob")?.value ?? draft.job; draft.note = $("#rqNote")?.value ?? draft.note;
+  draft.lines = $$("input[data-rq]").map(i => ({ code: i.dataset.rq, qty: Math.max(0, parseInt(i.value, 10) || 0) }));
+}
+function rqFind(txt) {
+  const t = txt.trim(); if (!t) return null;
+  if (S.materials[norm(t)]) return S.materials[norm(t)];
+  const hits = Object.values(S.materials).filter(m => m.name.toLowerCase() === t.toLowerCase() || m.name.toLowerCase().includes(t.toLowerCase()));
+  return hits.length === 1 ? hits[0] : hits.find(m => m.name.toLowerCase() === t.toLowerCase()) || null;
+}
+function reqModal() {
+  const d = draft, issue = d.kind === "issue", n = d.lines.filter(l => l.qty > 0).length;
+  const f = modal(`<h3>${issue ? "Issue material to a job" : "Return material from a job"}</h3>
+    <p class="meta">${esc(curName())} &middot; ${issue ? "Everything below comes out of stock in one step." : "Everything below goes back into stock."}</p>
+    <label>Job number<input name="job" id="rqJob" list="jobs" value="${esc(d.job)}" placeholder="e.g. C-230545" autocapitalize="characters" autocomplete="off" required></label>
+    ${issue ? "" : `<button type="button" class="btn light sm" style="margin-top:8px" data-act="rqLoad">Load what's out on this job</button>`}
+    <label>Add material (scan or type a code or name)<input id="rqCode" list="matlist" autocomplete="off"></label>
+    <div class="row" style="align-items:flex-end"><label class="grow">Qty<input id="rqQty" type="number" inputmode="numeric" min="1" value="1"></label><button type="button" class="btn dark" data-act="rqAdd" style="min-width:110px">Add</button></div>
+    <datalist id="matlist">${Object.values(S.materials).map(m => `<option value="${esc(m.code)}">${esc(m.name)}</option>`).join("")}</datalist>
+    <div class="pick" style="max-height:260px">${d.lines.length ? d.lines.map(l => { const m = S.materials[l.code]; return `<label style="justify-content:space-between"><span>${esc(m?.name || l.code)}<div class="meta">${esc(l.code)}${issue && m ? " &middot; " + m.qty + " here" : ""}</div></span><span style="display:flex;gap:8px;align-items:center"><input data-rq="${esc(l.code)}" type="number" inputmode="numeric" min="0" value="${l.qty}" style="width:76px;min-height:40px;height:40px"><button type="button" class="x" data-act="rqDel" data-code="${esc(l.code)}">&#10005;</button></span></label>`; }).join("") : '<div class="empty" style="margin:0">No materials added yet.</div>'}</div>
+    <label>Note (optional)<input name="note" id="rqNote" value="${esc(d.note || "")}"></label>
+    <div class="err"></div>
+    <div class="row"><button type="button" class="btn light" data-act="mclose">Cancel</button><button class="btn dark">${issue ? "Issue" : "Return"} ${n} item${n === 1 ? "" : "s"}</button></div>`,
+    async () => {
+      rqSync();
+      const lines = draft.lines.filter(l => l.qty > 0);
+      if (!draft.job.trim()) return mErr(f, "Enter a job number.");
+      if (!lines.length) return mErr(f, "Add at least one material.");
+      if (issue) { const over = lines.find(l => l.qty > (S.materials[l.code]?.qty ?? 0)); if (over) return mErr(f, `Only ${S.materials[over.code]?.qty ?? 0} ${unit(S.materials[over.code] || {})} of ${S.materials[over.code]?.name || over.code} on hand here.`); }
+      await rpc("requisition", { p_location: S.cur, p_job: draft.job.trim(), p_kind: draft.kind, p_lines: lines, p_note: (draft.note || "").trim() });
+      const jobNo = draft.job.trim().toUpperCase(); draft = null;
+      await loadAll(); closeModal(); toast(`${issue ? "Issued" : "Returned"} ${lines.length} item${lines.length === 1 ? "" : "s"} ${issue ? "to" : "from"} ${jobNo}.`); refresh();
+    });
+  const add = () => { rqSync(); const m = rqFind($("#rqCode").value), q = parseInt($("#rqQty").value, 10) || 0; if (!m) return mErr(f, "Pick a material from the list."); if (q < 1) return mErr(f, "Enter a quantity above 0."); const ex = draft.lines.find(l => l.code === m.code); if (ex) ex.qty += q; else draft.lines.push({ code: m.code, qty: q }); reqModal(); $("#rqCode").focus(); };
+  f.addEventListener("keydown", e => { if (e.key === "Enter" && e.target.id === "rqCode") { e.preventDefault(); add(); } });
+  f._add = add;
+}
+
 // ---------- HISTORY ----------
 function renderHistory() {
   const q = histQ.toLowerCase();
@@ -608,7 +663,7 @@ const A = {
   rejectLine: async d => { await rpc("resolve_line", { p_line: d.id, p_approve: false }); await afterCountChange(); },
   approveAll: async d => { await rpc("approve_all", { p_count: d.id }); await afterCountChange(); },
   pickLoc: () => modal(`<h3>Where are you?</h3><div class="list" style="margin-top:12px">${S.locs.map(l => `<button type="button" class="btn ${l.id === S.cur ? "dark" : "light"} block" style="margin-top:8px" data-act="setLoc" data-id="${l.id}">${esc(l.name)}</button>`).join("")}</div>`),
-  setLoc: async d => { S.cur = d.id; saveLoc(d.id); openCount = null; S.detail = null; histQ = ""; $("#scanPanel").innerHTML = ""; closeModal(); await loadAll(); refresh(); },
+  setLoc: async d => { draft = null; S.cur = d.id; saveLoc(d.id); openCount = null; S.detail = null; histQ = ""; $("#scanPanel").innerHTML = ""; closeModal(); await loadAll(); refresh(); },
   transfer: d => {
     const m = S.materials[d.code], dests = S.dest.filter(l => l.id !== S.cur);
     if (!dests.length) return toast("There's no other location to send to yet.", true);
@@ -644,6 +699,21 @@ const A = {
       await rpc("set_user_locations", { p_user: d.id, p_locations: fd.getAll("l") });
       await loadAll(); closeModal(); renderTeam(); toast("Saved.");
     });
+  },
+  rqNew: d => { draft = { kind: d.k, job: "", note: "", lines: [] }; reqModal(); },
+  rqAdd: () => $("#modal form")._add(),
+  rqDel: d => { rqSync(); draft.lines = draft.lines.filter(l => l.code !== d.code); reqModal(); },
+  rqLoad: async () => {
+    rqSync(); if (!draft.job.trim()) return mErr($("#modal form"), "Enter the job number first.");
+    const rows = await rpc("job_net", { p_job: draft.job.trim(), p_location: S.cur });
+    if (!rows.length) return mErr($("#modal form"), "Nothing is out on that job at this location.");
+    draft.lines = rows.map(r => ({ code: r.code, qty: r.net })); reqModal();
+  },
+  jobNet: async d => {
+    const rows = await rpc("job_net", { p_job: d.job, p_location: S.cur });
+    modal(`<h3>${esc(d.job)}</h3><p class="meta">Out on this job at ${esc(curName())} (issued minus returned).</p>
+      ${rows.length ? rows.map(r => `<div class="item"><div class="nm">${esc(r.name)}</div><b>${r.net} ${esc(r.unit)}</b></div>`).join("") : '<div class="empty">Nothing is currently out on this job here.</div>'}
+      <div class="row"><button type="button" class="btn dark" data-act="mclose">Close</button></div>`);
   },
   editMe: profile,
   signOut,

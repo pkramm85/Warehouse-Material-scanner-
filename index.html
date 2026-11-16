@@ -64,6 +64,7 @@
   <!-- COUNTS -->
   <section id="v-counts" class="view"></section>
   <!-- TEAM -->
+  <section id="v-jobs" class="view"></section>
   <section id="v-team" class="view"></section>
 
   <!-- HELP -->
@@ -84,6 +85,8 @@
       <p>The material isn't in the list yet. Managers can add it on the spot. Everyone else should ask a manager.</p>
       <h3>Locations</h3>
       <p>The bar under the logo shows where you are. Tap it to switch location (only if you have more than one). Stock, history, counts and low-stock minimums are kept separately for each location. To move material between locations, open it and tap <b>Transfer</b>. Admins add locations and choose who can work where on the <b>Team</b> tab.</p>
+      <h3>Jobs</h3>
+      <p>On <b>Jobs</b>, tap <b>Issue to job</b>, type the job number (like C-230545), add every material and quantity, and send it. Everything comes out of stock at once. To roll material back, tap <b>Return from job</b>, enter the job number, press <b>Load what's out on this job</b>, adjust the quantities, and send. You can't return more than was issued to that job at your location.</p>
       <h3>Cycle counts</h3>
       <p>Counts tab: open a count, enter what's on the shelf (expected numbers stay hidden), send for approval. A manager approves differences.</p>
       <h3>Roles</h3>
@@ -101,6 +104,7 @@
 <nav class="tabs">
   <button data-act="tab" data-t="scan" class="on"><svg viewBox="0 0 24 24"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M7 12h10"/></svg>Scan</button>
   <button data-act="tab" data-t="stock"><svg viewBox="0 0 24 24"><path d="M21 8l-9-5-9 5v8l9 5 9-5zM3 8l9 5 9-5M12 13v8"/></svg>Stock</button>
+  <button data-act="tab" data-t="jobs"><svg viewBox="0 0 24 24"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2M3 13h18"/></svg>Jobs</button>
   <button data-act="tab" data-t="history"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>History</button>
   <button data-act="tab" data-t="counts"><svg viewBox="0 0 24 24"><rect x="6" y="4" width="12" height="17" rx="2"/><path d="M9 4h6v3H9zM9 12h6M9 16h6"/></svg>Counts</button>
   <button data-act="tab" data-t="team"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><circle cx="17" cy="9" r="2.5"/><path d="M17 14c2.5 0 4 2 4 4"/></svg>Team</button>
