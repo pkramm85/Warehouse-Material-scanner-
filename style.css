@@ -187,3 +187,14 @@ textarea:focus { outline:2px solid var(--brand); outline-offset:-1px; }
   body.printing .lbl svg { height:17mm; margin:2mm 0 1mm; }
   body.printing .lbl .lc { font-size:12pt; }
 }
+
+/* location bar */
+#locBar { max-width:640px; margin:0 auto; padding:10px 16px 0; }
+#locBar:empty { display:none; }
+#locBar .loc { display:flex; align-items:center; gap:8px; width:100%; min-height:44px; padding:0 14px; background:#fff; border:1px solid var(--line); border-radius:12px; font:600 15px Inter,sans-serif; color:var(--brand); text-align:left; }
+#locBar .loc svg { width:18px; height:18px; flex:none; }
+#locBar .loc span { flex:1; }
+#locBar .loc small { font-weight:500; color:var(--mute, #6b746d); }
+label select { margin-top:6px; }
+.btn svg { width:18px; height:18px; vertical-align:-4px; margin-right:6px; }
+.top2.ctr { align-items:center; margin-top:18px; }
