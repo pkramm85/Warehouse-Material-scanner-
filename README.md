@@ -5,6 +5,7 @@ A phone-friendly web app for checking material in and out, tracking stock, and r
 ## Tabs
 - **Scan**: Check in / Check out, camera or typed code, quantity, job, note. Undo for 15 minutes. Low-stock list and recent scans.
 - **Locations**: a bar under the logo shows where you are. Stock, history, counts and minimums are per location; **Transfer** moves material between locations. Admins add locations and assign people on Team.
+- **Jobs**: issue many materials to a job number in one request, or return them to stock.
 - **Stock**: on-hand list, low/out tiles, search. Admins can add, edit, correct counts, delete, export and import a CSV.
 - **History**: every scan, searchable and filterable, with CSV export.
 - **Counts**: blind cycle counts with admin approval of differences.
