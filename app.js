@@ -14,18 +14,19 @@ const ICON = {
   edit: '<svg viewBox="0 0 24 24"><path d="M4 20l4-1 11-11-3-3L5 16zM14 6l3 3"/></svg>',
   fix: '<svg viewBox="0 0 24 24"><rect x="6" y="4" width="12" height="17" rx="2"/><path d="M9 13l2 2 4-4"/></svg>',
   bar: '<svg viewBox="0 0 24 24"><path d="M4 5v14M8 5v14M12 5v14M15 5v14M20 5v14"/></svg>',
+  move: '<svg viewBox="0 0 24 24"><path d="M4 8h13M13 4l4 4-4 4M20 16H7M11 12l-4 4 4 4"/></svg>',
   del: '<svg viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg>',
 };
 
 // ---------- state + backend ----------
-const S = { me: null, materials: {}, scans: [], counts: [], team: [], detail: null };
+const S = { me: null, locs: [], allLocs: [], dest: [], cur: null, materials: {}, scans: [], counts: [], team: [], uloc: {}, detail: null };
 let sb = null;
 const role = () => S.me?.role;
 const isManager = () => role() === "manager" || role() === "admin";
 const isAdmin = () => role() === "admin";
 const unit = m => m.unit || "pcs";
 const state = m => (m.qty <= 0 ? "out" : m.min > 0 && m.qty <= m.min ? "low" : "ok");
-const mapScan = r => ({ id: r.id, ts: Date.parse(r.ts), user: r.user_name, userId: r.user_id, code: r.code, name: r.name, unit: r.unit, type: r.type, delta: r.delta, after: r.after_qty, job: r.job, note: r.note });
+const mapScan = r => ({ other: r.other_location, loc: r.location_name, id: r.id, ts: Date.parse(r.ts), user: r.user_name, userId: r.user_id, code: r.code, name: r.name, unit: r.unit, type: r.type, delta: r.delta, after: r.after_qty, job: r.job, note: r.note });
 const fail = e => toast(friendly(e), true);
 const friendly = e => {
   const m = (e && e.message) || String(e);
@@ -37,15 +38,28 @@ async function rpc(fn, args) { const { data, error } = await sb.rpc(fn, args); i
 async function ok(q) { const r = await q; if (r.error) throw r.error; return r.data; }
 
 async function loadAll() {
-  const [m, s, c] = await Promise.all([
-    ok(sb.from("materials").select("*").order("name")),
-    ok(sb.from("scans").select("*").order("ts", { ascending: false }).limit(1000)),
-    ok(sb.from("counts").select("*").order("created_at", { ascending: false })),
-  ]);
-  S.materials = {}; m.forEach(r => (S.materials[r.code] = { code: r.code, name: r.name, unit: r.unit, min: r.min_qty, qty: r.qty }));
-  S.scans = s.map(mapScan);
-  S.counts = c.map(r => ({ id: r.id, ts: Date.parse(r.created_at), by: r.by_name, status: r.status }));
-  if (isAdmin()) S.team = await ok(sb.from("profiles").select("*").order("created_at"));
+  const mine = await rpc("my_locations");
+  S.allLocs = mine;
+  S.locs = mine.filter(l => l.active);
+  if (!S.locs.some(l => l.id === S.cur)) S.cur = (S.locs.find(l => l.id === savedLoc()) || S.locs[0])?.id || null;
+  S.dest = await ok(sb.from("locations").select("id,name").eq("active", true).order("name"));
+  if (!S.cur) { S.materials = {}; S.scans = []; S.counts = []; }
+  else {
+    const [m, st, sc, c] = await Promise.all([
+      ok(sb.from("materials").select("*").order("name")),
+      ok(sb.from("stock").select("*").eq("location_id", S.cur)),
+      ok(sb.from("scans").select("*").eq("location_id", S.cur).order("ts", { ascending: false }).limit(1000)),
+      ok(sb.from("counts").select("*").eq("location_id", S.cur).order("created_at", { ascending: false })),
+    ]);
+    const at = {}; st.forEach(r => (at[r.material_code] = r));
+    S.materials = {}; m.forEach(r => (S.materials[r.code] = { code: r.code, name: r.name, unit: r.unit, min: at[r.code]?.min_qty ?? 0, qty: at[r.code]?.qty ?? 0 }));
+    S.scans = sc.map(mapScan);
+    S.counts = c.map(r => ({ id: r.id, ts: Date.parse(r.created_at), by: r.by_name, status: r.status }));
+  }
+  if (isAdmin()) {
+    S.team = await ok(sb.from("profiles").select("*").order("created_at"));
+    S.uloc = {}; (await ok(sb.from("user_locations").select("*"))).forEach(r => (S.uloc[r.user_id] ||= []).push(r.location_id));
+  }
 }
 let reloadTimer;
 function liveReload() {
@@ -54,9 +68,12 @@ function liveReload() {
 }
 function subscribe() {
   const ch = sb.channel("live");
-  ["materials", "scans", "counts"].forEach(t => ch.on("postgres_changes", { event: "*", schema: "public", table: t }, liveReload));
+  ["materials", "stock", "scans", "counts", "locations", "user_locations"].forEach(t => ch.on("postgres_changes", { event: "*", schema: "public", table: t }, liveReload));
   ch.subscribe();
 }
+const curName = () => S.locs.find(l => l.id === S.cur)?.name || "";
+const savedLoc = () => { try { return localStorage.getItem("loc:" + S.me.id); } catch { return null; } };
+const saveLoc = id => { try { localStorage.setItem("loc:" + S.me.id, id); } catch { /* private mode */ } };
 const canUndo = s => isManager() || (s.userId === S.me.id && Date.now() - s.ts < 15 * 60 * 1000);
 async function undo(id) {
   try { await rpc("undo_scan", { p_id: id }); await loadAll(); refresh(); } catch (e) { fail(e); }
@@ -162,8 +179,8 @@ function newPasswordScreen() {
   };
 }
 function pendingScreen(reason) {
-  gate(`<div class="card"><h3>${reason === "off" ? "Account switched off" : "Waiting for approval"}</h3>
-    <p class="meta" style="font-size:15px">${reason === "off" ? "An admin has switched this account off." : "Your account is created. An admin needs to approve it and give you a role."} Signed in as ${esc(S.me.email)}.</p>
+  gate(`<div class="card"><h3>${reason === "off" ? "Account switched off" : reason === "noloc" ? "No location yet" : "Waiting for approval"}</h3>
+    <p class="meta" style="font-size:15px">${reason === "off" ? "An admin has switched this account off." : reason === "noloc" ? "An admin needs to assign you to a location." : "Your account is created. An admin needs to approve it and give you a role."} Signed in as ${esc(S.me.email)}.</p>
     <div class="row" style="margin-top:16px"><button class="btn light" id="gSignOut">Sign out</button><button class="btn dark grow" id="gCheck">Check again</button></div></div>`);
   $("#gSignOut").onclick = signOut;
   $("#gCheck").onclick = () => enter();
@@ -178,6 +195,7 @@ async function enter() {
   S.me = { id: p.id, name: p.name, email: p.email, role: p.active ? p.role : "pending", off: !p.active };
   if (S.me.role === "pending") return pendingScreen(S.me.off ? "off" : "pending");
   try { await loadAll(); } catch (e) { return authScreen("in", friendly(e)); }
+  if (!S.cur && !isAdmin()) return pendingScreen("noloc");
   gate("");
   if (!enter.live) { subscribe(); enter.live = true; }
   showTab("scan");
@@ -195,6 +213,8 @@ function showTab(t) {
 }
 function refresh(opts = {}) {
   if (!S.me) return;
+  const lb = $("#locBar"), here = S.locs.find(l => l.id === S.cur);
+  lb.innerHTML = here ? `<button ${S.locs.length > 1 ? 'data-act="pickLoc"' : ""} class="loc"><svg viewBox="0 0 24 24"><path d="M12 21s7-6.2 7-11a7 7 0 0 0-14 0c0 4.8 7 11 7 11z"/><circle cx="12" cy="10" r="2.5"/></svg><span>${esc(here.name)}</span>${S.locs.length > 1 ? "<small>Change</small>" : ""}</button>` : "";
   $("#av").textContent = (S.me.name || "?").split(/\s+/).map(w => w[0]).slice(0, 2).join("").toUpperCase();
   $("#meName").textContent = S.me.name;
   $("#jobs").innerHTML = [...new Set(S.scans.map(s => s.job).filter(Boolean))].slice(0, 30).map(j => `<option value="${esc(j)}">`).join("");
@@ -216,7 +236,7 @@ function renderScan() {
     ? rec.map(s => `<div class="item"><div><div class="nm">${esc(s.name)}</div><div class="meta">${label(s)} &middot; ${when(s.ts)}${s.job ? " &middot; " + esc(s.job) : ""}</div></div></div>`).join("")
     : '<div class="empty">No scans yet.</div>';
 }
-const label = s => s.type === "fix" ? `Count fix ${s.delta >= 0 ? "+" : ""}${s.delta}` : `${s.type === "in" ? "Checked in" : "Checked out"} ${Math.abs(s.delta)} ${esc(s.unit)}`;
+const label = s => s.type === "transfer" ? (s.delta < 0 ? `Sent ${Math.abs(s.delta)} ${esc(s.unit)} to ${esc(s.other)}` : `Received ${s.delta} ${esc(s.unit)} from ${esc(s.other)}`) : s.type === "fix" ? `Count fix ${s.delta >= 0 ? "+" : ""}${s.delta}` : `${s.type === "in" ? "Checked in" : "Checked out"} ${Math.abs(s.delta)} ${esc(s.unit)}`;
 
 function find(raw) {
   const code = norm(raw);
@@ -232,7 +252,8 @@ function find(raw) {
     <div class="stepper"><button type="button" data-act="step" data-d="-1">&minus;</button><input id="qty" type="number" inputmode="numeric" min="1" value="1"><button type="button" data-act="step" data-d="1">+</button></div>
     <label>Job or reason<input id="job" list="jobs" value="${esc(lastJob)}" placeholder="e.g. Smith Elementary"></label>
     <label>Note (optional)<input id="note"></label>
-    <button class="go ${mode}" id="go" data-act="commit" data-code="${esc(m.code)}"></button></div>`;
+    <button class="go ${mode}" id="go" data-act="commit" data-code="${esc(m.code)}"></button>
+    ${S.dest.length > 1 ? `<button class="btn light block" style="margin-top:10px" data-act="transfer" data-code="${esc(m.code)}">${ICON.move}Transfer to another location</button>` : ""}</div>`;
   goLabel();
   $("#qty").oninput = goLabel;
 }
@@ -250,7 +271,7 @@ async function commit(code) {
   const go = $("#go"); go.disabled = true;
   try {
     lastJob = $("#job").value.trim();
-    const s = await rpc("record_scan", { p_code: code, p_type: mode, p_qty: q, p_job: lastJob, p_note: $("#note").value.trim() });
+    const s = await rpc("record_scan", { p_code: code, p_type: mode, p_qty: q, p_job: lastJob, p_note: $("#note").value.trim(), p_location: S.cur });
     await loadAll();
     $("#scanPanel").innerHTML = ""; $("#code").value = "";
     toast(`${mode === "in" ? "Checked in" : "Checked out"} ${q} ${unit(m)}. ${S.materials[code].qty} on hand.`, false, s.id);
@@ -315,7 +336,7 @@ function renderStock() {
     .sort((a, b) => rank[state(a)] - rank[state(b)] || a.name.localeCompare(b.name));
   const mg = isManager();
   $("#v-stock").innerHTML = `
-    <h2 class="first">Stock</h2><p class="sub">What's on hand right now.</p>
+    <h2 class="first">Stock</h2><p class="sub">What's on hand at ${esc(curName())} right now.</p>
     <div class="row wrap">
       ${mg ? `<button class="btn light sm" data-act="exportStock">Export stock</button><button class="btn light sm" data-act="import">Import counts</button><button class="btn light sm" data-act="labels">Print labels</button><button class="btn dark sm" data-act="addNew">+ Add material</button>` : ""}
     </div>
@@ -323,7 +344,7 @@ function renderStock() {
     <div class="find" style="margin-top:0"><input id="stockQ" placeholder="Search by name or code" value="${esc(stockQ)}"><button class="btn light" data-act="lowOnly" style="${lowOnly ? "background:var(--brand);color:#fff" : ""}">Low only</button></div>
     ${rows.length ? rows.map(m => `<div class="mat"><div class="head"><div><div class="nm" style="font:600 18px Barlow,Inter,sans-serif">${esc(m.name)}</div><div class="meta">${esc(m.code)}</div></div>
       <div class="qn">${m.qty} <small>${esc(unit(m))}</small>${state(m) !== "ok" ? `<div><span class="tag ${state(m)}">${state(m) === "out" ? "Out" : "Low"}</span></div>` : ""}</div></div>
-      <div class="acts"><button data-act="matHist" data-code="${esc(m.code)}">${ICON.hist}History</button>
+      <div class="acts"><button data-act="matHist" data-code="${esc(m.code)}">${ICON.hist}History</button>${S.dest.length > 1 && m.qty > 0 ? `<button data-act="transfer" data-code="${esc(m.code)}">${ICON.move}Transfer</button>` : ""}
       ${mg ? `<button data-act="edit" data-code="${esc(m.code)}">${ICON.edit}Edit</button><button data-act="fix" data-code="${esc(m.code)}">${ICON.fix}Correct count</button><button data-act="labels" data-code="${esc(m.code)}">${ICON.bar}Label</button><button class="del" data-act="del" data-code="${esc(m.code)}">${ICON.del}Delete</button>` : ""}</div></div>`).join("")
       : `<div class="empty"><b>${all.length ? "No matches" : "No materials yet"}</b>${all.length ? "Try a different search." : mg ? "Add a material, scan a new label, or import a spreadsheet." : "A manager needs to add materials first."}</div>`}`;
   $("#stockQ").oninput = e => { stockQ = e.target.value; const p = e.target.selectionStart; renderStock(); const i = $("#stockQ"); i.focus(); i.setSelectionRange(p, p); };
@@ -334,19 +355,20 @@ function materialForm(code, existing) {
     <label>Code<input name="code" value="${esc(m.code)}" ${existing ? "readonly" : 'autocapitalize="characters"'} required></label>
     <label>Name<input name="name" value="${esc(m.name)}" placeholder='e.g. 1/2" EMT conduit' required></label>
     <div class="row"><label class="grow" style="margin-top:12px">Unit<input name="unit" value="${esc(m.unit)}" placeholder="pcs, ft, box"></label>
-    <label class="grow" style="margin-top:12px">Low stock at<input name="min" type="number" inputmode="numeric" min="0" value="${m.min}"></label></div>
-    ${existing ? "" : `<label>Starting count<input name="qty" type="number" inputmode="numeric" min="0" value="0"></label>`}
+    <label class="grow" style="margin-top:12px">Low stock at (here)<input name="min" type="number" inputmode="numeric" min="0" value="${m.min}"></label></div>
+    ${existing ? "" : `<label>Starting count at ${esc(curName())}<input name="qty" type="number" inputmode="numeric" min="0" value="0"></label>`}
     <div class="err"></div>
     <div class="row"><button type="button" class="btn light" data-act="mclose">Cancel</button><button class="btn dark">Save</button></div>`,
     async fd => {
       const c = norm(fd.get("code")), name = fd.get("name").trim(), u = fd.get("unit").trim() || "pcs", min = Math.max(0, parseInt(fd.get("min"), 10) || 0);
       if (!c || !name) return mErr(f, "Code and name are required.");
-      if (existing) await ok(sb.from("materials").update({ name, unit: u, min_qty: min }).eq("code", c));
+      if (existing) { await ok(sb.from("materials").update({ name, unit: u }).eq("code", c)); await rpc("set_min", { p_code: c, p_location: S.cur, p_min: min }); }
       else {
         if (S.materials[c]) return mErr(f, "That code already exists.");
-        await ok(sb.from("materials").insert({ code: c, name, unit: u, min_qty: min }));
+        await ok(sb.from("materials").insert({ code: c, name, unit: u }));
+        await rpc("set_min", { p_code: c, p_location: S.cur, p_min: min });
         const q = parseInt(fd.get("qty"), 10) || 0;
-        if (q > 0) await rpc("correct_count", { p_code: c, p_new: q, p_note: "Starting count" });
+        if (q > 0) await rpc("correct_count", { p_code: c, p_location: S.cur, p_new: q, p_note: "Starting count" });
       }
       await loadAll(); closeModal();
       if (tab === "scan" && !existing) { $("#code").value = c; find(c); }
@@ -360,27 +382,39 @@ function importFlow(file) {
     if (rows.length < 2) return toast("That file has no rows.", true);
     const head = rows[0].map(h => h.trim().toLowerCase());
     const col = (...n) => head.findIndex(h => n.includes(h));
-    const ci = col("code"), ni = col("name"), qi = col("count", "qty", "quantity", "on hand"), ui = col("unit"), mi = col("low stock at", "min", "minimum");
+    const ci = col("code"), ni = col("name"), qi = col("count", "qty", "quantity", "on hand"), ui = col("unit"), mi = col("low stock at", "min", "minimum"), li = col("location");
     if (ci < 0) return toast("The file needs a Code column.", true);
-    const byCode = {};
+    const byName = {}; S.locs.forEach(l => (byName[l.name.trim().toLowerCase()] = l.id));
+    const bad = new Set(), plan = {};
     rows.slice(1).forEach(row => {
       const code = norm(row[ci]); if (!code) return;
+      const ln = li >= 0 ? (row[li] || "").trim() : "";
+      const loc = ln ? byName[ln.toLowerCase()] : S.cur;
+      if (!loc) { bad.add(ln); return; }
       const cnt = qi >= 0 && row[qi]?.trim() !== "" ? parseInt(row[qi], 10) : null;
       const min = mi >= 0 && row[mi]?.trim() !== "" ? parseInt(row[mi], 10) : null;
-      byCode[code] = { code, name: ni >= 0 ? row[ni].trim() : "", unit: ui >= 0 ? row[ui].trim() : "", min: Number.isNaN(min) ? null : min, cnt: Number.isNaN(cnt) ? null : cnt };
+      plan[code + "|" + loc] = { code, loc, name: ni >= 0 ? row[ni].trim() : "", unit: ui >= 0 ? row[ui].trim() : "", min: Number.isNaN(min) ? null : min, cnt: Number.isNaN(cnt) ? null : cnt };
     });
-    const plan = Object.values(byCode);
-    const fresh = plan.filter(p => !S.materials[p.code]).length;
-    modal(`<h3>Import preview</h3><p class="meta">${plan.length} rows: ${fresh} new, ${plan.length - fresh} existing. Counts replace what's on hand and show in History as count fixes.</p><div class="err"></div>
+    if (bad.size) return toast(`Unknown location in the file: ${[...bad].join(", ")}. Use the exact location names.`, true);
+    const list = Object.values(plan);
+    const codes = [...new Set(list.map(p => p.code))];
+    const fresh = codes.filter(c => !S.materials[c]).length;
+    modal(`<h3>Import preview</h3><p class="meta">${codes.length} materials (${fresh} new, ${codes.length - fresh} existing) across ${new Set(list.map(p => p.loc)).size} location(s). Rows without a Location go to ${esc(curName())}. Counts replace what's on hand and show in History as count fixes.</p><div class="err"></div>
       <div class="row"><button type="button" class="btn light" data-act="mclose">Cancel</button><button class="btn dark">Import</button></div>`, async () => {
-      const news = plan.filter(p => !S.materials[p.code]);
-      if (news.length) await ok(sb.from("materials").insert(news.map(p => ({ code: p.code, name: p.name || p.code, unit: p.unit || "pcs", min_qty: p.min ?? 0 }))));
-      for (const p of plan.filter(p => S.materials[p.code])) {
-        const patch = {}; if (p.name) patch.name = p.name; if (p.unit) patch.unit = p.unit; if (p.min !== null) patch.min_qty = p.min;
+      const first = {}; list.forEach(p => { first[p.code] ||= p; });
+      const news = codes.filter(c => !S.materials[c]).map(c => first[c]);
+      if (news.length) await ok(sb.from("materials").insert(news.map(p => ({ code: p.code, name: p.name || p.code, unit: p.unit || "pcs" }))));
+      for (const p of Object.values(first).filter(p => S.materials[p.code])) {
+        const patch = {}; if (p.name) patch.name = p.name; if (p.unit) patch.unit = p.unit;
         if (Object.keys(patch).length) await ok(sb.from("materials").update(patch).eq("code", p.code));
       }
-      for (const p of plan) { const cur = S.materials[p.code]?.qty ?? 0; if (p.cnt !== null && p.cnt !== cur) await rpc("correct_count", { p_code: p.code, p_new: p.cnt, p_note: "Imported count" }); }
-      await loadAll(); closeModal(); toast(`Imported ${plan.length} rows.`); refresh();
+      const here = {}; list.forEach(p => { if (p.loc === S.cur) here[p.code] = S.materials[p.code]?.qty ?? 0; });
+      for (const p of list) {
+        if (p.min !== null) await rpc("set_min", { p_code: p.code, p_location: p.loc, p_min: p.min });
+        const cur = p.loc === S.cur ? here[p.code] : null;
+        if (p.cnt !== null && p.cnt !== cur) await rpc("correct_count", { p_code: p.code, p_location: p.loc, p_new: p.cnt, p_note: "Imported count" });
+      }
+      await loadAll(); closeModal(); toast(`Imported ${list.length} rows.`); refresh();
     });
   };
   r.readAsText(file);
@@ -421,10 +455,10 @@ function renderHistory() {
   const q = histQ.toLowerCase();
   const rows = S.scans.filter(s => (histFilter === "all" || s.type === histFilter) && (!q || [s.name, s.code, s.job, s.user, s.note].join(" ").toLowerCase().includes(q)));
   $("#v-history").innerHTML = `
-    <div class="top2"><div><h2 class="first">History</h2><p class="sub">Every check-in, check-out and count correction.</p></div>
+    <div class="top2"><div><h2 class="first">History</h2><p class="sub">Every check-in, check-out, transfer and count correction at this location.</p></div>
     ${isManager() ? '<button class="btn light sm" data-act="exportHist">Export CSV</button>' : ""}</div>
     <input id="histQ" placeholder="Search material, code, job or person" value="${esc(histQ)}">
-    <div class="chips">${[["all", "All"], ["in", "Check in"], ["out", "Check out"], ["fix", "Corrections"]].map(([k, l]) => `<button data-act="hf" data-k="${k}" class="${histFilter === k ? "on" : ""}">${l}</button>`).join("")}</div>
+    <div class="chips">${[["all", "All"], ["in", "In"], ["out", "Out"], ["transfer", "Transfers"], ["fix", "Fixes"]].map(([k, l]) => `<button data-act="hf" data-k="${k}" class="${histFilter === k ? "on" : ""}">${l}</button>`).join("")}</div>
     ${rows.length ? rows.map(s => `<div class="hrow"><div class="t"><span>${esc(s.name)}</span><span class="d ${s.type === "fix" ? "fix" : s.delta >= 0 ? "pos" : "neg"}">${s.delta >= 0 ? "+" : ""}${s.delta} ${esc(s.unit)}</span></div>
       <div class="meta">${label(s)} &middot; ${esc(s.user)} &middot; ${when(s.ts)}${s.job ? "<br>Job: " + esc(s.job) : ""}${s.note ? "<br>" + esc(s.note) : ""}</div>
       ${canUndo(s) ? `<button class="link" data-act="undo" data-id="${s.id}">Remove this scan</button>` : ""}</div>`).join("")
@@ -440,7 +474,7 @@ function renderCounts() {
   if (c) return renderCountDetail(c, v);
   const grp = st => S.counts.filter(c => c.status === st);
   const card = c => `<div class="card" data-act="openCount" data-id="${c.id}" style="cursor:pointer"><div class="top2"><div><h3>${cname(c)}</h3><div class="meta">Started by ${esc(c.by)}</div></div><span class="badge ${c.status === "review" ? "wait" : ""}">${{ open: "Counting", review: "Needs approval", done: "Done" }[c.status]}</span></div></div>`;
-  v.innerHTML = `<div class="top2"><div><h2 class="first">Counts</h2><p class="sub">Count what's on the shelf. Expected numbers stay hidden. A manager approves the differences.</p></div>
+  v.innerHTML = `<div class="top2"><div><h2 class="first">Counts</h2><p class="sub">Count what's on the shelf at ${esc(curName())}. Expected numbers stay hidden. A manager approves the differences.</p></div>
     ${isManager() ? '<button class="btn dark sm" data-act="newCount">+ New count</button>' : ""}</div>
     ${S.counts.length ? ["review", "open", "done"].map(st => grp(st).map(card).join("")).join("")
       : `<div class="empty"><b>No counts yet</b>${isManager() ? 'Start a count, pick the materials, then count what is on the shelf.<br><button class="btn light" data-act="newCount">Start a count</button>' : "A manager starts a count and it shows up here."}</div>`}`;
@@ -489,11 +523,15 @@ const ROLE_NOTE = {
 };
 function renderTeam() {
   const me = `<div class="card"><div class="top2"><div><h3>${esc(S.me.name)}</h3><div class="meta">${esc(S.me.email)}</div></div><span class="role">${esc(role())}</span></div><p class="meta" style="margin-top:10px">${ROLE_NOTE[role()]}</p></div>`;
-  if (!isAdmin()) { $("#v-team").innerHTML = `<h2 class="first">Team</h2><p class="sub">Your access.</p>${me}`; return; }
+  if (!isAdmin()) { $("#v-team").innerHTML = `<h2 class="first">Team</h2><p class="sub">Your access.</p>${me}<p class="meta" style="margin-top:12px">Locations: ${S.locs.map(l => esc(l.name)).join(", ") || "none yet"}</p>`; return; }
   const sorted = [...S.team].sort((a, b) => (a.role === "pending" ? -1 : 0) - (b.role === "pending" ? -1 : 0) || a.name.localeCompare(b.name));
-  $("#v-team").innerHTML = `<h2 class="first">Team</h2><p class="sub">New sign-ups wait here until you give them a role. Warehouse scans and counts. Manager also edits stock and approves counts. Admin also manages people.</p>${me}
+  const lname = id => S.allLocs.find(l => l.id === id)?.name;
+  $("#v-team").innerHTML = `<h2 class="first">Team</h2><p class="sub">New sign-ups wait here until you give them a role and a location. Warehouse scans and counts. Manager also edits stock and approves counts. Admin also manages people and locations.</p>${me}
+    <div class="top2 ctr"><h2 style="margin-bottom:0">Locations</h2><button class="btn dark sm" data-act="locForm">+ Add location</button></div>
+    ${S.allLocs.map(l => `<div class="item"><div><div class="nm">${esc(l.name)} ${l.active ? "" : '<span class="role pending">Off</span>'}</div></div><button class="btn light sm" data-act="locForm" data-id="${l.id}">Edit</button></div>`).join("")}
     <h2>People</h2>
-    ${sorted.map(p => `<div class="item"><div><div class="nm">${esc(p.name)} ${p.role === "pending" ? '<span class="role pending">Needs approval</span>' : ""}${p.active ? "" : ' <span class="role pending">Off</span>'}</div><div class="meta">${esc(p.email)}</div></div>
+    ${sorted.map(p => `<div class="item"><div><div class="nm">${esc(p.name)} ${p.role === "pending" ? '<span class="role pending">Needs approval</span>' : ""}${p.active ? "" : ' <span class="role pending">Off</span>'}</div><div class="meta">${esc(p.email)}</div>
+      ${p.role === "admin" ? '<div class="meta">All locations</div>' : p.role === "pending" ? "" : `<button class="link" data-act="userLocs" data-id="${p.id}">${(S.uloc[p.id] || []).map(lname).filter(Boolean).map(esc).join(", ") || "No locations. Tap to assign"}</button>`}</div>
       ${p.id === S.me.id ? '<span class="role">You</span>' : `<select class="rsel" data-act="setRole" data-id="${p.id}">${["pending", "warehouse", "manager", "admin"].map(r => `<option value="${r}" ${p.role === r ? "selected" : ""}>${r === "pending" ? "No access" : r[0].toUpperCase() + r.slice(1)}</option>`).join("")}<option value="off" ${!p.active ? "selected" : ""}>Switch off</option></select>`}</div>`).join("")}`;
 }
 
@@ -522,7 +560,7 @@ const A = {
       <label>What's really on the shelf<input name="n" type="number" inputmode="numeric" min="0" value="${m.qty}" required></label><div class="err"></div>
       <div class="row"><button type="button" class="btn light" data-act="mclose">Cancel</button><button class="btn dark">Save</button></div>`, async fd => {
       const n = parseInt(fd.get("n"), 10); if (Number.isNaN(n) || n < 0) return mErr(f, "Enter a number, 0 or higher.");
-      if (n !== m.qty) await rpc("correct_count", { p_code: d.code, p_new: n });
+      if (n !== m.qty) await rpc("correct_count", { p_code: d.code, p_location: S.cur, p_new: n });
       await loadAll(); closeModal(); refresh();
     });
   },
@@ -532,18 +570,18 @@ const A = {
       <div class="row"><button type="button" class="btn light" data-act="mclose">Cancel</button><button class="btn danger">Delete</button></div>`, async () => { await ok(sb.from("materials").delete().eq("code", d.code)); await loadAll(); closeModal(); refresh(); });
   },
   lowOnly: () => { lowOnly = !lowOnly; renderStock(); },
-  exportStock: () => download("stock.csv", toCSV([["Code", "Name", "Count", "Unit", "Low stock at"], ...Object.values(S.materials).map(m => [m.code, m.name, m.qty, unit(m), m.min])])),
-  exportHist: () => download("history.csv", toCSV([["Time", "Person", "Type", "Code", "Material", "Change", "Unit", "Job", "Note"], ...S.scans.map(s => [new Date(s.ts).toISOString(), s.user, s.type, s.code, s.name, s.delta, s.unit, s.job || "", s.note || ""])])),
+  exportStock: () => download("stock.csv", toCSV([["Code", "Name", "Count", "Unit", "Low stock at", "Location"], ...Object.values(S.materials).map(m => [m.code, m.name, m.qty, unit(m), m.min, curName()])])),
+  exportHist: () => download("history.csv", toCSV([["Time", "Location", "Person", "Type", "Code", "Material", "Change", "Unit", "Job", "Note"], ...S.scans.map(s => [new Date(s.ts).toISOString(), s.loc || "", s.user, s.type, s.code, s.name, s.delta, s.unit, s.job || "", s.note || ""])])),
   labels: d => labelsModal(d.code || ""),
   lblAll: () => { $("#lblCodes").value = Object.keys(S.materials).join("\n"); $("#lblCodes").dispatchEvent(new Event("input")); },
   lblClear: () => { $("#lblCodes").value = ""; $("#lblCodes").dispatchEvent(new Event("input")); },
   import: () => {
-    modal(`<h3>Import counts</h3><p class="meta">Choose a CSV with these headings: Code, Name, Count, Unit, Low stock at. Only Code is required.</p>
+    modal(`<h3>Import counts</h3><p class="meta">Choose a CSV with these headings: Code, Name, Count, Unit, Low stock at, Location. Only Code is required. Leave Location blank to use the location you are in.</p>
       <input id="file" type="file" accept=".csv,text/csv" style="padding-top:12px">
       <div class="row"><button type="button" class="btn light" data-act="sheet">Download count sheet</button><button type="button" class="btn light" data-act="mclose">Cancel</button></div>`);
     $("#file").onchange = e => e.target.files[0] && importFlow(e.target.files[0]);
   },
-  sheet: () => download("count-sheet.csv", toCSV([["Code", "Name", "Count", "Unit", "Low stock at"], ["EXAMPLE-001", "1/2 in EMT conduit", 100, "ft", 20]])),
+  sheet: () => download("count-sheet.csv", toCSV([["Code", "Name", "Count", "Unit", "Low stock at", "Location"], ["EXAMPLE-001", "1/2 in EMT conduit", 100, "ft", 20, curName()]])),
   hf: d => { histFilter = d.k; renderHistory(); },
   newCount: () => {
     const mats = Object.values(S.materials);
@@ -554,7 +592,7 @@ const A = {
       <div class="row"><button type="button" class="btn light" data-act="mclose">Cancel</button><button class="btn dark">Start count</button></div>`, async fd => {
       const w = fd.get("w"); const codes = w === "all" ? mats.map(m => m.code) : w === "low" ? mats.filter(m => state(m) !== "ok").map(m => m.code) : fd.getAll("p");
       if (!codes.length) return mErr(f, "No materials match. Pick at least one.");
-      openCount = await rpc("create_count", { p_codes: codes });
+      openCount = await rpc("create_count", { p_location: S.cur, p_codes: codes });
       await loadAll(); closeModal(); S.detail = null;
       const c = S.counts.find(x => x.id === openCount); if (c) await loadDetail(c); else refresh();
     });
@@ -569,6 +607,44 @@ const A = {
   approveLine: async d => { await rpc("resolve_line", { p_line: d.id, p_approve: true }); await afterCountChange(); },
   rejectLine: async d => { await rpc("resolve_line", { p_line: d.id, p_approve: false }); await afterCountChange(); },
   approveAll: async d => { await rpc("approve_all", { p_count: d.id }); await afterCountChange(); },
+  pickLoc: () => modal(`<h3>Where are you?</h3><div class="list" style="margin-top:12px">${S.locs.map(l => `<button type="button" class="btn ${l.id === S.cur ? "dark" : "light"} block" style="margin-top:8px" data-act="setLoc" data-id="${l.id}">${esc(l.name)}</button>`).join("")}</div>`),
+  setLoc: async d => { S.cur = d.id; saveLoc(d.id); openCount = null; S.detail = null; histQ = ""; $("#scanPanel").innerHTML = ""; closeModal(); await loadAll(); refresh(); },
+  transfer: d => {
+    const m = S.materials[d.code], dests = S.dest.filter(l => l.id !== S.cur);
+    if (!dests.length) return toast("There's no other location to send to yet.", true);
+    const f = modal(`<h3>Transfer ${esc(m.name)}</h3><p class="meta">${esc(curName())} has ${m.qty} ${esc(unit(m))}. It moves right away and both locations update.</p>
+      <label>Send to<select name="to">${dests.map(l => `<option value="${l.id}">${esc(l.name)}</option>`).join("")}</select></label>
+      <label>Quantity<input name="q" type="number" inputmode="numeric" min="1" value="1" required></label>
+      <label>Note (optional)<input name="note"></label><div class="err"></div>
+      <div class="row"><button type="button" class="btn light" data-act="mclose">Cancel</button><button class="btn dark">Transfer</button></div>`, async fd => {
+      const q = parseInt(fd.get("q"), 10), to = fd.get("to");
+      if (!(q > 0)) return mErr(f, "Enter a quantity above 0.");
+      if (q > m.qty) return mErr(f, `Only ${m.qty} ${unit(m)} on hand here.`);
+      await rpc("transfer_stock", { p_code: d.code, p_from: S.cur, p_to: to, p_qty: q, p_note: (fd.get("note") || "").trim() });
+      await loadAll(); closeModal(); $("#scanPanel").innerHTML = ""; $("#code").value = "";
+      toast(`Sent ${q} ${unit(m)} to ${dests.find(l => l.id === to).name}.`); refresh();
+    });
+  },
+  locForm: d => {
+    const l = d.id ? S.allLocs.find(x => x.id === d.id) : null;
+    const f = modal(`<h3>${l ? "Edit location" : "Add location"}</h3>
+      <label>Name<input name="n" value="${esc(l?.name || "")}" placeholder="e.g. 2100 Byberry" required></label>
+      ${l ? `<label style="display:flex;gap:10px;align-items:center;margin-top:14px"><input type="checkbox" name="a" style="width:auto;min-height:0" ${l.active ? "checked" : ""}> Active (uncheck to switch it off)</label>` : ""}
+      <div class="err"></div><div class="row"><button type="button" class="btn light" data-act="mclose">Cancel</button><button class="btn dark">Save</button></div>`, async fd => {
+      const n = (fd.get("n") || "").trim(); if (!n) return mErr(f, "Enter a name.");
+      if (l) await rpc("update_location", { p_id: l.id, p_name: n, p_active: !!fd.get("a") }); else await rpc("create_location", { p_name: n });
+      await loadAll(); closeModal(); refresh();
+    });
+  },
+  userLocs: d => {
+    const p = S.team.find(x => x.id === d.id), have = S.uloc[d.id] || [];
+    modal(`<h3>${esc(p.name)}</h3><p class="meta">Pick every location this person can work in.</p>
+      <div class="pick" style="max-height:none">${S.allLocs.filter(l => l.active).map(l => `<label><input type="checkbox" name="l" value="${l.id}" ${have.includes(l.id) ? "checked" : ""}>${esc(l.name)}</label>`).join("")}</div><div class="err"></div>
+      <div class="row"><button type="button" class="btn light" data-act="mclose">Cancel</button><button class="btn dark">Save</button></div>`, async fd => {
+      await rpc("set_user_locations", { p_user: d.id, p_locations: fd.getAll("l") });
+      await loadAll(); closeModal(); renderTeam(); toast("Saved.");
+    });
+  },
   editMe: profile,
   signOut,
   mclose: closeModal,
