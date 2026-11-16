@@ -13,6 +13,7 @@ const ICON = {
   hist: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>',
   edit: '<svg viewBox="0 0 24 24"><path d="M4 20l4-1 11-11-3-3L5 16zM14 6l3 3"/></svg>',
   fix: '<svg viewBox="0 0 24 24"><rect x="6" y="4" width="12" height="17" rx="2"/><path d="M9 13l2 2 4-4"/></svg>',
+  bar: '<svg viewBox="0 0 24 24"><path d="M4 5v14M8 5v14M12 5v14M15 5v14M20 5v14"/></svg>',
   del: '<svg viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg>',
 };
 
@@ -316,14 +317,14 @@ function renderStock() {
   $("#v-stock").innerHTML = `
     <h2 class="first">Stock</h2><p class="sub">What's on hand right now.</p>
     <div class="row wrap">
-      ${mg ? `<button class="btn light sm" data-act="exportStock">Export stock</button><button class="btn light sm" data-act="import">Import counts</button><button class="btn dark sm" data-act="addNew">+ Add material</button>` : ""}
+      ${mg ? `<button class="btn light sm" data-act="exportStock">Export stock</button><button class="btn light sm" data-act="import">Import counts</button><button class="btn light sm" data-act="labels">Print labels</button><button class="btn dark sm" data-act="addNew">+ Add material</button>` : ""}
     </div>
     <div class="tiles"><div><small>Materials</small><b>${all.length}</b></div><div><small>Low on stock</small><b class="lowv">${low}</b></div><div><small>Out of stock</small><b class="outv">${out}</b></div></div>
     <div class="find" style="margin-top:0"><input id="stockQ" placeholder="Search by name or code" value="${esc(stockQ)}"><button class="btn light" data-act="lowOnly" style="${lowOnly ? "background:var(--brand);color:#fff" : ""}">Low only</button></div>
     ${rows.length ? rows.map(m => `<div class="mat"><div class="head"><div><div class="nm" style="font:600 18px Barlow,Inter,sans-serif">${esc(m.name)}</div><div class="meta">${esc(m.code)}</div></div>
       <div class="qn">${m.qty} <small>${esc(unit(m))}</small>${state(m) !== "ok" ? `<div><span class="tag ${state(m)}">${state(m) === "out" ? "Out" : "Low"}</span></div>` : ""}</div></div>
       <div class="acts"><button data-act="matHist" data-code="${esc(m.code)}">${ICON.hist}History</button>
-      ${mg ? `<button data-act="edit" data-code="${esc(m.code)}">${ICON.edit}Edit</button><button data-act="fix" data-code="${esc(m.code)}">${ICON.fix}Correct count</button><button class="del" data-act="del" data-code="${esc(m.code)}">${ICON.del}Delete</button>` : ""}</div></div>`).join("")
+      ${mg ? `<button data-act="edit" data-code="${esc(m.code)}">${ICON.edit}Edit</button><button data-act="fix" data-code="${esc(m.code)}">${ICON.fix}Correct count</button><button data-act="labels" data-code="${esc(m.code)}">${ICON.bar}Label</button><button class="del" data-act="del" data-code="${esc(m.code)}">${ICON.del}Delete</button>` : ""}</div></div>`).join("")
       : `<div class="empty"><b>${all.length ? "No matches" : "No materials yet"}</b>${all.length ? "Try a different search." : mg ? "Add a material, scan a new label, or import a spreadsheet." : "A manager needs to add materials first."}</div>`}`;
   $("#stockQ").oninput = e => { stockQ = e.target.value; const p = e.target.selectionStart; renderStock(); const i = $("#stockQ"); i.focus(); i.setSelectionRange(p, p); };
 }
@@ -383,6 +384,31 @@ function importFlow(file) {
     });
   };
   r.readAsText(file);
+}
+
+// ---------- LABELS (barcode generator) ----------
+const parseCodes = txt => [...new Set(txt.split(/[\n,;]+/).map(s => s.trim()).filter(Boolean))].slice(0, 200);
+function labelHTML(code) {
+  const m = S.materials[norm(code)] || S.materials[code];
+  try { return `<div class="lbl"><div class="ln">${esc(m ? m.name : "")}</div>${Code128.svg(code, { module: 2, height: 60 })}<div class="lc">${esc(code)}</div></div>`; }
+  catch (e) { return `<div class="lbl bad">${esc(code)}<br>${esc(e.message)}</div>`; }
+}
+function labelsModal(prefill) {
+  const f = modal(`<h3>Barcode labels</h3><p class="meta">Type or paste SKUs, one per line. Each becomes a Code 128 barcode that the camera and Bluetooth scanners can read. Names appear when the SKU is in Stock.</p>
+    <label>SKUs<textarea id="lblCodes" placeholder="PVC200&#10;EMT-050">${esc(prefill || "")}</textarea></label>
+    <div class="row wrap" style="margin-top:8px"><button type="button" class="btn light sm" data-act="lblAll">Add all materials</button><button type="button" class="btn light sm" data-act="lblClear">Clear</button></div>
+    <div class="lblprev" id="lblPrev"></div><div class="err"></div>
+    <div class="row"><button type="button" class="btn light" data-act="mclose">Close</button><button class="btn dark">Print</button></div>`,
+  () => {
+    const codes = parseCodes($("#lblCodes").value);
+    if (!codes.length) return mErr(f, "Enter at least one SKU.");
+    $("#printArea").innerHTML = codes.map(labelHTML).join("");
+    document.body.classList.add("printing");
+    window.addEventListener("afterprint", () => document.body.classList.remove("printing"), { once: true });
+    window.print();
+  });
+  const upd = () => { $("#lblPrev").innerHTML = parseCodes($("#lblCodes").value).map(labelHTML).join(""); };
+  $("#lblCodes").oninput = upd; upd();
 }
 
 // ---------- HISTORY ----------
@@ -503,6 +529,9 @@ const A = {
   lowOnly: () => { lowOnly = !lowOnly; renderStock(); },
   exportStock: () => download("stock.csv", toCSV([["Code", "Name", "Count", "Unit", "Low stock at"], ...Object.values(S.materials).map(m => [m.code, m.name, m.qty, unit(m), m.min])])),
   exportHist: () => download("history.csv", toCSV([["Time", "Person", "Type", "Code", "Material", "Change", "Unit", "Job", "Note"], ...S.scans.map(s => [new Date(s.ts).toISOString(), s.user, s.type, s.code, s.name, s.delta, s.unit, s.job || "", s.note || ""])])),
+  labels: d => labelsModal(d.code || ""),
+  lblAll: () => { $("#lblCodes").value = Object.keys(S.materials).join("\n"); $("#lblCodes").dispatchEvent(new Event("input")); },
+  lblClear: () => { $("#lblCodes").value = ""; $("#lblCodes").dispatchEvent(new Event("input")); },
   import: () => {
     modal(`<h3>Import counts</h3><p class="meta">Choose a CSV with these headings: Code, Name, Count, Unit, Low stock at. Only Code is required.</p>
       <input id="file" type="file" accept=".csv,text/csv" style="padding-top:12px">
