@@ -164,3 +164,26 @@ dialog::backdrop { background:rgba(20,30,25,.5); }
 .role { display:inline-block; font-size:12px; font-weight:600; padding:3px 10px; border-radius:999px; background:#e0e8e2; color:var(--brand); text-transform:capitalize; }
 .role.pending { background:var(--lowbg); color:var(--low); }
 select.rsel { min-height:44px; width:auto; padding:0 10px; }
+
+/* barcode labels */
+textarea { width:100%; min-height:110px; padding:12px 14px; font:15px/1.4 ui-monospace, Menlo, monospace; color:var(--ink); background:#fff; border:1px solid var(--line); border-radius:12px; resize:vertical; margin-top:5px; }
+textarea:focus { outline:2px solid var(--brand); outline-offset:-1px; }
+.lblprev { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:12px; max-height:260px; overflow:auto; }
+.lbl { background:#fff; border:1px solid var(--line); border-radius:8px; padding:8px 8px 6px; text-align:center; break-inside:avoid; }
+.lbl .ln { font:600 12px Inter, sans-serif; line-height:1.2; height:2.4em; overflow:hidden; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; }
+.lbl svg { width:100%; height:44px; display:block; margin:4px 0 2px; stroke:none; stroke-width:0; }
+.lbl svg * { stroke:none; stroke-width:0; }
+.lbl .lc { font:600 13px ui-monospace, Menlo, monospace; letter-spacing:.04em; }
+.lbl.wide { grid-column:1 / -1; }
+.lbl.bad { border-color:var(--outink); color:var(--outink); font-size:12px; }
+#printArea { display:none; }
+@media print {
+  @page { margin:10mm; }
+  body.printing { background:#fff; padding:0; }
+  body.printing > *:not(#printArea) { display:none !important; }
+  body.printing #printArea { display:grid; grid-template-columns:repeat(2, 1fr); gap:6mm; }
+  body.printing .lbl { border:1px dashed #bbb; border-radius:0; padding:4mm 4mm 3mm; }
+  body.printing .lbl .ln { font-size:12pt; line-height:1.2; height:2.4em; }
+  body.printing .lbl svg { height:17mm; margin:2mm 0 1mm; }
+  body.printing .lbl .lc { font-size:12pt; }
+}
