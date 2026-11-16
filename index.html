@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Warehouse Material Scanner</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header><h1>Material Scanner</h1></header>
+
+<main>
+  <!-- SCAN -->
+  <section id="tab-scan" class="tab active">
+    <video id="video" playsinline muted hidden></video>
+    <div class="row">
+      <button id="camBtn">Start camera</button>
+      <button id="camStop" class="ghost" hidden>Stop</button>
+    </div>
+    <p id="camMsg" class="hint"></p>
+    <label>Code (type, or use a Bluetooth/USB scanner)
+      <input id="codeInput" autocomplete="off" autocapitalize="characters" placeholder="Scan or type a code, press Enter">
+    </label>
+    <div id="result"></div>
+  </section>
+
+  <!-- INVENTORY -->
+  <section id="tab-inventory" class="tab">
+    <input id="search" placeholder="Search code, name or location">
+    <div class="row">
+      <button id="exportBtn" class="ghost">Export CSV</button>
+      <button id="logBtn" class="ghost">Export history</button>
+    </div>
+    <div id="invList"></div>
+  </section>
+
+  <!-- RECEIVE -->
+  <section id="tab-receive" class="tab">
+    <label>PO number <input id="poInput" placeholder="e.g. PO-10442"></label>
+    <label>Code <input id="rcCode" autocomplete="off" autocapitalize="characters"></label>
+    <label>Item name (new items only) <input id="rcName"></label>
+    <label>Quantity <input id="rcQty" type="number" min="1" value="1" inputmode="numeric"></label>
+    <label>Location <input id="rcLoc" list="locList" autocapitalize="characters" placeholder="e.g. A-03-2"></label>
+    <button id="rcBtn">Receive</button>
+    <p id="rcMsg" class="hint"></p>
+  </section>
+
+  <!-- LOCATIONS -->
+  <section id="tab-locations" class="tab">
+    <div id="locView"></div>
+  </section>
+</main>
+
+<datalist id="locList"></datalist>
+
+<nav>
+  <button data-tab="scan" class="on">Scan</button>
+  <button data-tab="inventory">Inventory</button>
+  <button data-tab="receive">Receive</button>
+  <button data-tab="locations">Locations</button>
+</nav>
+
+<script src="app.js"></script>
+</body>
+</html>
